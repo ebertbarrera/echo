@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   run:
+    # Run only when the issue has label agent:build OR when someone comments /agent-run
     if: >
       (github.event_name == 'issues' && contains(join(github.event.issue.labels.*.name, ','), 'agent:build'))
       || (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/agent-run'))
@@ -21,8 +22,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: Run actions/checkout@v4
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Git safety & identity
         run: |
@@ -48,12 +51,24 @@ jobs:
 
       - name: Setup Python
         uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
+        with:
+          python-version: '3.11'
 
-      - name: Install OpenHands
+      # ✅ FULLY PATCHED STEPS BEGIN HERE
+      - name: Install OpenHands (CLI)
         run: |
           python -m pip install --upgrade pip
-          pip install openhands
+          # Install the CLI entrypoint via python -m openhands
+          python -m pip install "openhands[cli]"
+
+      - name: Verify OpenHands CLI
+        run: |
+          # Prove the CLI is importable and runnable
+          python -m openhands --help | head -n 1
+          python - <<'PY'
+          import openhands
+          print("openhands", openhands.__version__)
+          PY
 
       - name: Run Agent on this issue (commit-as-you-go)
         env:
@@ -63,10 +78,12 @@ jobs:
           BR="feat/issue-${{ github.event.issue.number || github.run_id }}"
           git checkout -B "$BR"
           ./scripts/checkpoint.sh "chore: pre-run checkpoint"
-          openhands run \
+          python -m openhands run \
             --repo-path . \
             --task-source "github_issue:${{ github.repository }}:${{ github.event.issue.number || github.event.issue.number }}" \
             --model "${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}" \
             --max-iterations "${{ vars.OPENHANDS_MAX_ITER || '8' }}" \
             --commit-pr
           ./scripts/checkpoint.sh "chore: post-run checkpoint"
+      # ✅ PATCHED STEPS END HERE
+
