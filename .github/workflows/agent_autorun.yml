@@ -1,0 +1,72 @@
+name: Agent Autorun (Issues → PR)
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: agent-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    if: >
+      (github.event_name == 'issues' && contains(join(github.event.issue.labels.*.name, ','), 'agent:build'))
+      || (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/agent-run'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Git safety & identity
+        run: |
+          git config --global safe.directory '*'
+          git config --global user.email "agent@local"
+          git config --global user.name "AI Agent"
+
+      - name: Add checkpoint script
+        run: |
+          mkdir -p scripts
+          cat > scripts/checkpoint.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          msg="${1:-checkpoint}"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "$msg"
+            git push -u origin HEAD || true
+          fi
+          SH
+          chmod +x scripts/checkpoint.sh
+          ./scripts/checkpoint.sh "chore: add checkpoint script"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: Install OpenHands
+        run: |
+          python -m pip install --upgrade pip
+          pip install openhands
+
+      - name: Run Agent on this issue (commit-as-you-go)
+        env:
+          OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          BR="feat/issue-${{ github.event.issue.number || github.run_id }}"
+          git checkout -B "$BR"
+          ./scripts/checkpoint.sh "chore: pre-run checkpoint"
+          openhands run \
+            --repo-path . \
+            --task-source "github_issue:${{ github.repository }}:${{ github.event.issue.number || github.event.issue.number }}" \
+            --model "${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}" \
+            --max-iterations "${{ vars.OPENHANDS_MAX_ITER || '8' }}" \
+            --commit-pr
+          ./scripts/checkpoint.sh "chore: post-run checkpoint"
