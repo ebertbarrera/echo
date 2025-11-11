@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   run:
-    # Trigger when the issue has label agent:build OR someone comments /agent-run
+    # run when issue has label agent:build OR someone comments /agent-run
     if: >
       (github.event_name == 'issues' && contains(join(github.event.issue.labels.*.name, ','), 'agent:build'))
       || (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/agent-run'))
@@ -118,17 +118,24 @@ jobs:
         run: |
           set -euo pipefail
           BR="$(cat .BRANCH_NAME)"
+
+          # Build a single message file safely (avoid YAML/heredoc pitfalls)
+          {
+            cat ISSUE_TITLE.txt
+            echo
+            echo "$AGENT_PROMPT"
+            echo
+            echo "==== ORIGINAL ISSUE BODY ===="
+            cat ISSUE_BODY.md
+            echo
+            printf "(Use at most %s focused edit iterations; commit between chunks.)\n" "$MAX_ITERS"
+          } > MSG.txt
+
           python3 -m aider \
             --yes \
             --model "$AIDER_MODEL" \
-            --message "$(cat ISSUE_TITLE.txt)
+            --message "$(cat MSG.txt)"
 
-$AGENT_PROMPT
-
-==== ORIGINAL ISSUE BODY ====
-$(cat ISSUE_BODY.md)
-
-(Use at most ${MAX_ITERS} focused edit iterations; commit between chunks.)"
           ./scripts/checkpoint.sh "feat: initial aider pass"
 
       - name: Open or update PR
@@ -143,4 +150,3 @@ $(cat ISSUE_BODY.md)
             gh pr edit "$BR" --title "$(cat ISSUE_TITLE.txt)" || true
           fi
           echo "PR ready on branch $BR"
- 
