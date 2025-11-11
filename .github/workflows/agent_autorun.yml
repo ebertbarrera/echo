@@ -1,4 +1,4 @@
-name: Agent Autorun (Issues → PR) — Docker
+name: Agent Autorun (Issues → PR)
 
 on:
   issues:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   run:
-    # Only when issue has label agent:build OR someone comments /agent-run
+    # Trigger when issue has label agent:build OR someone comments /agent-run
     if: >
       (github.event_name == 'issues' && contains(join(github.event.issue.labels.*.name, ','), 'agent:build'))
       || (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/agent-run'))
@@ -49,38 +49,69 @@ jobs:
           chmod +x scripts/checkpoint.sh
           ./scripts/checkpoint.sh "chore: add checkpoint script"
 
+      - name: Prepare Python 3.11
+        uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: System deps (git) + print Python info
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y git
+          which python
+          python --version
+
+      # ------- Robust OpenHands install with triple fallback + verification -------
+      - name: Install OpenHands (PyPI → CLI extra → base → GitHub)
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip wheel setuptools
+
+          # Try PyPI with CLI extras
+          if ! python -m pip install "openhands[cli]"; then
+            echo "PyPI [cli] failed; trying base package…" >&2
+            if ! python -m pip install openhands; then
+              echo "PyPI base failed; installing from GitHub…" >&2
+              python -m pip install "git+https://github.com/All-Hands-AI/OpenHands.git@main#egg=openhands"
+            fi
+          fi
+
+          echo "---- pip show ----"
+          python -m pip show openhands || true
+
+          echo "---- import test ----"
+          python - <<'PY'
+          import sys, importlib
+          m = importlib.import_module("openhands")
+          print("python:", sys.version)
+          print("openhands module:", m.__name__, getattr(m, "__version__", "unknown"))
+          PY
+
+          echo "---- module help ----"
+          python -m openhands --help | head -n 5 || (echo "python -m openhands not runnable"; exit 2)
+      # ---------------------------------------------------------------------------
+
       - name: Ensure feature branch exists
         run: |
+          set -euxo pipefail
           BR="feat/issue-${{ github.event.issue.number || github.run_id }}"
           git checkout -B "$BR"
           git push -u origin "$BR" || true
-
-      # 🐳 Run OpenHands inside a stable Docker image (avoids PATH/127 errors)
-      - name: Pull OpenHands image
-        run: |
-          docker pull ghcr.io/all-hands-ai/openhands:stable
 
       - name: Run Agent on this issue (commit-as-you-go)
         env:
           OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
-          MAX_ITERS: ${{ vars.OPENHANDS_MAX_ITER || '8' }}
         run: |
           set -euxo pipefail
+          BR="feat/issue-${{ github.event.issue.number || github.run_id }}"
           ./scripts/checkpoint.sh "chore: pre-run checkpoint"
 
-          docker run --rm \
-            -e OPENAI_API_KEY="$OPENAI_API_KEY" \
-            -e GITHUB_TOKEN="$GITHUB_TOKEN" \
-            -v "$PWD":/workspace \
-            -w /workspace \
-            ghcr.io/all-hands-ai/openhands:stable \
-            openhands run \
-              --repo-path /workspace \
-              --task-source "github_issue:${{ github.repository }}:${{ github.event.issue.number || github.event.issue.number }}" \
-              --model "$LLM_MODEL" \
-              --max-iterations "$MAX_ITERS" \
-              --commit-pr
+          python -m openhands run \
+            --repo-path . \
+            --task-source "github_issue:${{ github.repository }}:${{ github.event.issue.number || github.event.issue.number }}" \
+            --model "${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}" \
+            --max-iterations "${{ vars.OPENHANDS_MAX_ITER || '8' }}" \
+            --commit-pr
 
           ./scripts/checkpoint.sh "chore: post-run checkpoint"
