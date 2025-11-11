@@ -1,4 +1,4 @@
-name: Agent Autorun (Issues → PR)
+name: Agent Autorun (Issues → PR) — Aider
 
 on:
   issues:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   run:
-    # Trigger when issue has label agent:build OR someone comments /agent-run
+    # Trigger when the issue has label agent:build OR someone comments /agent-run
     if: >
       (github.event_name == 'issues' && contains(join(github.event.issue.labels.*.name, ','), 'agent:build'))
       || (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/agent-run'))
@@ -21,6 +21,17 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+
+    env:
+      # Inputs
+      REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number || github.event.issue.number }}
+      LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
+      MAX_ITERS: ${{ vars.OPENHANDS_MAX_ITER || '8' }}
+
+      # Secrets
+      OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
+      GH_TOKEN: ${{ secrets.PAT_TOKEN }}   # for gh cli + PRs
 
     steps:
       - name: Checkout
@@ -47,71 +58,85 @@ jobs:
           fi
           SH
           chmod +x scripts/checkpoint.sh
-          ./scripts/checkpoint.sh "chore: add checkpoint script"
 
-      - name: Prepare Python 3.11
-        uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-
-      - name: System deps (git) + print Python info
+      - name: Install deps (gh cli, python, aider)
         run: |
           set -euxo pipefail
           sudo apt-get update -y
-          sudo apt-get install -y git
-          which python
-          python --version
+          sudo apt-get install -y gh
+          python3 --version || true
+          sudo apt-get install -y python3-pip
+          python3 -m pip install --upgrade pip
+          python3 -m pip install "aider-chat==0.60.0"  # stable known version
+          python3 -m aider --version
 
-      # ------- Robust OpenHands install with triple fallback + verification -------
-      - name: Install OpenHands (PyPI → CLI extra → base → GitHub)
+      - name: Fetch issue spec
         run: |
           set -euxo pipefail
-          python -m pip install --upgrade pip wheel setuptools
-
-          # Try PyPI with CLI extras
-          if ! python -m pip install "openhands[cli]"; then
-            echo "PyPI [cli] failed; trying base package…" >&2
-            if ! python -m pip install openhands; then
-              echo "PyPI base failed; installing from GitHub…" >&2
-              python -m pip install "git+https://github.com/All-Hands-AI/OpenHands.git@main#egg=openhands"
-            fi
-          fi
-
-          echo "---- pip show ----"
-          python -m pip show openhands || true
-
-          echo "---- import test ----"
-          python - <<'PY'
-          import sys, importlib
-          m = importlib.import_module("openhands")
-          print("python:", sys.version)
-          print("openhands module:", m.__name__, getattr(m, "__version__", "unknown"))
-          PY
-
-          echo "---- module help ----"
-          python -m openhands --help | head -n 5 || (echo "python -m openhands not runnable"; exit 2)
-      # ---------------------------------------------------------------------------
+          gh api repos/$REPO/issues/$ISSUE_NUMBER --jq '.title' > ISSUE_TITLE.txt
+          gh api repos/$REPO/issues/$ISSUE_NUMBER --jq '.body'  > ISSUE_BODY.md
+          echo "== Title ==" && cat ISSUE_TITLE.txt
+          echo "== Body  ==" && wc -c ISSUE_BODY.md
 
       - name: Ensure feature branch exists
         run: |
           set -euxo pipefail
-          BR="feat/issue-${{ github.event.issue.number || github.run_id }}"
+          BR="feat/issue-${ISSUE_NUMBER:-$GITHUB_RUN_ID}"
+          echo "$BR" > .BRANCH_NAME
           git checkout -B "$BR"
           git push -u origin "$BR" || true
+          ./scripts/checkpoint.sh "chore: branch ready"
 
-      - name: Run Agent on this issue (commit-as-you-go)
+      - name: Run Aider — single PR build with cost guard
         env:
-          OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          AIDER_MODEL: ${{ env.LLM_MODEL }}
         run: |
           set -euxo pipefail
-          BR="feat/issue-${{ github.event.issue.number || github.run_id }}"
-          ./scripts/checkpoint.sh "chore: pre-run checkpoint"
+          BR=$(cat .BRANCH_NAME)
 
-          python -m openhands run \
-            --repo-path . \
-            --task-source "github_issue:${{ github.repository }}:${{ github.event.issue.number || github.event.issue.number }}" \
-            --model "${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}" \
-            --max-iterations "${{ vars.OPENHANDS_MAX_ITER || '8' }}" \
-            --commit-pr
+          cat > AGENT_PROMPT.txt <<'TXT'
+You are a senior full-stack engineer working in a Next.js App Router monorepo with Supabase.
+Goal: Implement the “Lease Execution Bundle” in ONE PR:
+A) Contract PDF (unsigned, PH long dates visible in header & clause)
+B) E-Sign (embed signature image + name + Manila timestamp; save signed PDF; SHA-256 hash; audit log row)
+C) Global date helper formatDateLong('en-PH') + regression test
+D) Lease chat (+ attachments), append-only; export PDF + JSON with Manila timestamps and integrity note
+E) Notarization helper (fields & file upload), optional gate before lease active OR owner_overridden=true
+F) Reminders skeleton: compute T-3/T-1/T0/T+3 vs due day; write audit logs (email stub only)
+DB: add columns/tables with RLS (leases fields; audit_logs; lease_messages). Storage buckets: contracts, chat-exports.
 
-          ./scripts/checkpoint.sh "chore: post-run checkpoint"
+Constraints:
+- Keep logs terse to save tokens. Commit early and often.
+- If time/iterations run low, finish in order A→F and leave TODOs.
+- Create minimal tests (Vitest) for date helper, hash, signed hash + audit, chat export, reminder offsets.
+- No secrets in code; browser only sees NEXT_PUBLIC_SUPABASE_URL/ANON_KEY. Service-role only server-side.
+- Use /apps/web and /db/migrations. Use @react-pdf/renderer or pdfkit. Use SHA-256.
+- After each logical chunk, commit with a clear message.
+
+Deliverables:
+- Working pages, API routes, migrations, storage rules (or proxy download), tests, and a concise PR description.
+TXT
+
+          # Run aider in non-interactive batch mode.
+          # --yes auto-applies file changes, --message supplies the full spec
+          # We cap iterations using MAX_ITERS to control spend.
+          python3 -m aider \
+            --yes \
+            --model "$AIDER_MODEL" \
+            --message "$(cat ISSUE_TITLE.txt)\n\n$(cat AGENT_PROMPT.txt)\n\n==== ORIGINAL ISSUE BODY ====\n$(cat ISSUE_BODY.md)\n\n(Use at most ${MAX_ITERS} focused edit iterations; commit between chunks.)"
+
+          ./scripts/checkpoint.sh "feat: initial aider pass"
+
+      - name: Open or update PR
+        run: |
+          set -euxo pipefail
+          BR=$(cat .BRANCH_NAME)
+          # Create PR if missing; otherwise update title/body quietly
+          if ! gh pr view "$BR" >/dev/null 2>&1; then
+            gh pr create --base main --head "$BR" \
+              --title "$(cat ISSUE_TITLE.txt)" \
+              --body "$(printf 'Automated agent build from issue #%s.\n\nSee issue for scope.' "$ISSUE_NUMBER")"
+          else
+            gh pr edit "$BR" --title "$(cat ISSUE_TITLE.txt)" || true
+          fi
+          echo "PR ready on branch $BR"
