@@ -1,0 +1,9 @@
+# Node/Next/Supabase
+node_modules
+.next
+out
+dist
+.env
+.env.*
+.vercel
+coverage
