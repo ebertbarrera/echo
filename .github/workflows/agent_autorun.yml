@@ -1,4 +1,4 @@
-name: Agent Autorun (Issues -> PR) — Aider
+name: Agent Autorun (Issues -> PR) - Aider
 
 on:
   issues:
@@ -85,41 +85,36 @@ jobs:
           git push -u origin "$BR" || true
           ./scripts/checkpoint.sh "chore: branch ready"
 
-      - name: Create agent prompt file
-        run: |
-          set -euo pipefail
-          cat > AGENT_PROMPT.txt <<'TXT'
-You are a senior full-stack engineer working in a Next.js App Router monorepo with Supabase.
-
-Goal: Implement the "Lease Execution Bundle" in ONE PR:
-A) Contract PDF (unsigned, PH long dates visible in header & clause)
-B) E-Sign (embed signature image + name + Manila timestamp; save signed PDF; SHA-256 hash; audit log row)
-C) Global date helper formatDateLong('en-PH') + regression test
-D) Lease chat (+ attachments), append-only; export PDF + JSON with Manila timestamps and integrity note
-E) Notarization helper (fields & file upload), optional gate before lease active OR owner_overridden=true
-F) Reminders skeleton: compute T-3/T-1/T0/T+3 vs due day; write audit logs (email stub only)
-
-DB:
-- Add columns/tables with RLS:
-  - leases: contract_url, contract_hash_sha256, contract_version, signed_contract_url, signed_contract_hash_sha256, signed_at, notarized_url, notarized_at, owner_overridden default false
-  - audit_logs: id, user_id, lease_id, action, details jsonb, ip, user_agent, created_at (RLS: user_id = auth.uid() for SELECT)
-  - lease_messages: id, lease_id, sender_id, body, attachment_path, message_hash, created_at (RLS: participants-only SELECT/INSERT)
-- Storage buckets: contracts, chat-exports (participant-only via Storage RLS or proxy download)
-
-Constraints:
-- Commit early and often; keep logs terse to save tokens.
-- If time/iterations run low, finish in order A->F and leave concise TODOs.
-- Minimal tests (Vitest): date helper; SHA-256; signed hash + audit; chat export; reminder offsets.
-- No secrets in code; browser only sees NEXT_PUBLIC_SUPABASE_URL/ANON_KEY. Service-role only server-side.
-- Use /apps/web and /db/migrations. Prefer @react-pdf/renderer; fallback pdfkit.
-
-Deliverables:
-- Pages, API routes, migrations, storage rules (or proxy), tests, and a concise PR description with 3-6 small screenshots.
-TXT
-
       - name: Run Aider (single-PR build with cost guard)
         env:
           AIDER_MODEL: ${{ env.LLM_MODEL }}
+          AGENT_PROMPT: |
+            You are a senior full-stack engineer working in a Next.js App Router monorepo with Supabase.
+
+            Goal: Implement the "Lease Execution Bundle" in ONE PR:
+            A) Contract PDF (unsigned, PH long dates visible in header & clause)
+            B) E-Sign (embed signature image + name + Manila timestamp; save signed PDF; SHA-256 hash; audit log row)
+            C) Global date helper formatDateLong('en-PH') + regression test
+            D) Lease chat (+ attachments), append-only; export PDF + JSON with Manila timestamps and integrity note
+            E) Notarization helper (fields & file upload), optional gate before lease active OR owner_overridden=true
+            F) Reminders skeleton: compute T-3/T-1/T0/T+3 vs due day; write audit logs (email stub only)
+
+            DB:
+            - Add columns/tables with RLS:
+              - leases: contract_url, contract_hash_sha256, contract_version, signed_contract_url, signed_contract_hash_sha256, signed_at, notarized_url, notarized_at, owner_overridden default false
+              - audit_logs: id, user_id, lease_id, action, details jsonb, ip, user_agent, created_at (RLS: user_id = auth.uid() for SELECT)
+              - lease_messages: id, lease_id, sender_id, body, attachment_path, message_hash, created_at (RLS: participants-only SELECT/INSERT)
+            - Storage buckets: contracts, chat-exports (participant-only via Storage RLS or proxy download)
+
+            Constraints:
+            - Commit early and often; keep logs terse to save tokens.
+            - If time/iterations run low, finish in order A->F and leave concise TODOs.
+            - Minimal tests (Vitest): date helper; SHA-256; signed hash + audit; chat export; reminder offsets.
+            - No secrets in code; browser only sees NEXT_PUBLIC_SUPABASE_URL/ANON_KEY. Service-role only server-side.
+            - Use /apps/web and /db/migrations. Prefer @react-pdf/renderer; fallback pdfkit.
+
+            Deliverables:
+            - Pages, API routes, migrations, storage rules (or proxy), tests, and a concise PR description with 3-6 small screenshots.
         run: |
           set -euo pipefail
           BR="$(cat .BRANCH_NAME)"
@@ -128,7 +123,7 @@ TXT
             --model "$AIDER_MODEL" \
             --message "$(cat ISSUE_TITLE.txt)
 
-$(cat AGENT_PROMPT.txt)
+$AGENT_PROMPT
 
 ==== ORIGINAL ISSUE BODY ====
 $(cat ISSUE_BODY.md)
