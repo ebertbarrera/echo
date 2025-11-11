@@ -1,4 +1,4 @@
-name: Agent Autorun (Issues → PR) — Aider
+name: Agent Autorun (Issues -> PR) — Aider
 
 on:
   issues:
@@ -7,7 +7,7 @@ on:
     types: [created]
 
 concurrency:
-  group: agent-${{ github.event.issue.number || github.run_id }}
+  group: "agent-${{ github.event.issue.number || github.run_id }}"
   cancel-in-progress: true
 
 jobs:
@@ -23,20 +23,18 @@ jobs:
       issues: write
 
     env:
-      # Inputs
       REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number || github.event.issue.number }}
       LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
       MAX_ITERS: ${{ vars.OPENHANDS_MAX_ITER || '8' }}
-
-      # Secrets
       OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
-      GH_TOKEN: ${{ secrets.PAT_TOKEN }}   # for gh cli + PRs
+      GH_TOKEN: ${{ secrets.PAT_TOKEN }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
 
       - name: Git safety & identity
         run: |
@@ -46,6 +44,7 @@ jobs:
 
       - name: Add checkpoint script
         run: |
+          set -euo pipefail
           mkdir -p scripts
           cat > scripts/checkpoint.sh <<'SH'
           #!/usr/bin/env bash
@@ -58,86 +57,94 @@ jobs:
           fi
           SH
           chmod +x scripts/checkpoint.sh
+          ./scripts/checkpoint.sh "chore: add checkpoint script"
 
       - name: Install deps (gh cli, python, aider)
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           sudo apt-get update -y
-          sudo apt-get install -y gh
-          python3 --version || true
-          sudo apt-get install -y python3-pip
+          sudo apt-get install -y gh python3-pip
           python3 -m pip install --upgrade pip
-          python3 -m pip install "aider-chat==0.60.0"  # stable known version
+          python3 -m pip install "aider-chat==0.60.0"
           python3 -m aider --version
 
       - name: Fetch issue spec
         run: |
-          set -euxo pipefail
-          gh api repos/$REPO/issues/$ISSUE_NUMBER --jq '.title' > ISSUE_TITLE.txt
-          gh api repos/$REPO/issues/$ISSUE_NUMBER --jq '.body'  > ISSUE_BODY.md
+          set -euo pipefail
+          gh api "repos/$REPO/issues/$ISSUE_NUMBER" --jq '.title' > ISSUE_TITLE.txt
+          gh api "repos/$REPO/issues/$ISSUE_NUMBER" --jq '.body'  > ISSUE_BODY.md
           echo "== Title ==" && cat ISSUE_TITLE.txt
-          echo "== Body  ==" && wc -c ISSUE_BODY.md
+          echo "== Body bytes ==" && wc -c ISSUE_BODY.md
 
       - name: Ensure feature branch exists
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           BR="feat/issue-${ISSUE_NUMBER:-$GITHUB_RUN_ID}"
           echo "$BR" > .BRANCH_NAME
           git checkout -B "$BR"
           git push -u origin "$BR" || true
           ./scripts/checkpoint.sh "chore: branch ready"
 
-      - name: Run Aider — single PR build with cost guard
-        env:
-          AIDER_MODEL: ${{ env.LLM_MODEL }}
+      - name: Create agent prompt file
         run: |
-          set -euxo pipefail
-          BR=$(cat .BRANCH_NAME)
-
+          set -euo pipefail
           cat > AGENT_PROMPT.txt <<'TXT'
 You are a senior full-stack engineer working in a Next.js App Router monorepo with Supabase.
-Goal: Implement the “Lease Execution Bundle” in ONE PR:
+
+Goal: Implement the "Lease Execution Bundle" in ONE PR:
 A) Contract PDF (unsigned, PH long dates visible in header & clause)
 B) E-Sign (embed signature image + name + Manila timestamp; save signed PDF; SHA-256 hash; audit log row)
 C) Global date helper formatDateLong('en-PH') + regression test
 D) Lease chat (+ attachments), append-only; export PDF + JSON with Manila timestamps and integrity note
 E) Notarization helper (fields & file upload), optional gate before lease active OR owner_overridden=true
 F) Reminders skeleton: compute T-3/T-1/T0/T+3 vs due day; write audit logs (email stub only)
-DB: add columns/tables with RLS (leases fields; audit_logs; lease_messages). Storage buckets: contracts, chat-exports.
+
+DB:
+- Add columns/tables with RLS:
+  - leases: contract_url, contract_hash_sha256, contract_version, signed_contract_url, signed_contract_hash_sha256, signed_at, notarized_url, notarized_at, owner_overridden default false
+  - audit_logs: id, user_id, lease_id, action, details jsonb, ip, user_agent, created_at (RLS: user_id = auth.uid() for SELECT)
+  - lease_messages: id, lease_id, sender_id, body, attachment_path, message_hash, created_at (RLS: participants-only SELECT/INSERT)
+- Storage buckets: contracts, chat-exports (participant-only via Storage RLS or proxy download)
 
 Constraints:
-- Keep logs terse to save tokens. Commit early and often.
-- If time/iterations run low, finish in order A→F and leave TODOs.
-- Create minimal tests (Vitest) for date helper, hash, signed hash + audit, chat export, reminder offsets.
+- Commit early and often; keep logs terse to save tokens.
+- If time/iterations run low, finish in order A->F and leave concise TODOs.
+- Minimal tests (Vitest): date helper; SHA-256; signed hash + audit; chat export; reminder offsets.
 - No secrets in code; browser only sees NEXT_PUBLIC_SUPABASE_URL/ANON_KEY. Service-role only server-side.
-- Use /apps/web and /db/migrations. Use @react-pdf/renderer or pdfkit. Use SHA-256.
-- After each logical chunk, commit with a clear message.
+- Use /apps/web and /db/migrations. Prefer @react-pdf/renderer; fallback pdfkit.
 
 Deliverables:
-- Working pages, API routes, migrations, storage rules (or proxy download), tests, and a concise PR description.
+- Pages, API routes, migrations, storage rules (or proxy), tests, and a concise PR description with 3-6 small screenshots.
 TXT
 
-          # Run aider in non-interactive batch mode.
-          # --yes auto-applies file changes, --message supplies the full spec
-          # We cap iterations using MAX_ITERS to control spend.
+      - name: Run Aider (single-PR build with cost guard)
+        env:
+          AIDER_MODEL: ${{ env.LLM_MODEL }}
+        run: |
+          set -euo pipefail
+          BR="$(cat .BRANCH_NAME)"
           python3 -m aider \
             --yes \
             --model "$AIDER_MODEL" \
-            --message "$(cat ISSUE_TITLE.txt)\n\n$(cat AGENT_PROMPT.txt)\n\n==== ORIGINAL ISSUE BODY ====\n$(cat ISSUE_BODY.md)\n\n(Use at most ${MAX_ITERS} focused edit iterations; commit between chunks.)"
+            --message "$(cat ISSUE_TITLE.txt)
 
+$(cat AGENT_PROMPT.txt)
+
+==== ORIGINAL ISSUE BODY ====
+$(cat ISSUE_BODY.md)
+
+(Use at most ${MAX_ITERS} focused edit iterations; commit between chunks.)"
           ./scripts/checkpoint.sh "feat: initial aider pass"
 
       - name: Open or update PR
         run: |
-          set -euxo pipefail
-          BR=$(cat .BRANCH_NAME)
-          # Create PR if missing; otherwise update title/body quietly
+          set -euo pipefail
+          BR="$(cat .BRANCH_NAME)"
           if ! gh pr view "$BR" >/dev/null 2>&1; then
             gh pr create --base main --head "$BR" \
               --title "$(cat ISSUE_TITLE.txt)" \
-              --body "$(printf 'Automated agent build from issue #%s.\n\nSee issue for scope.' "$ISSUE_NUMBER")"
+              --body "Automated agent build from issue #${ISSUE_NUMBER}. See issue for scope."
           else
             gh pr edit "$BR" --title "$(cat ISSUE_TITLE.txt)" || true
           fi
           echo "PR ready on branch $BR"
- 
