@@ -10,9 +10,6 @@ permissions:
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
-    env:
-      BRANCH_NAME: feat/post-merge-mega
-      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout
@@ -30,57 +27,32 @@ jobs:
       - name: Create or reset feature branch
         shell: bash
         run: |
-          set -euo pipefail
-          git checkout -B "$BRANCH_NAME"
+          git checkout -B feat/post-merge-mega
 
-      - name: Write baseline README (printf only; YAML-safe)
+      - name: Write baseline README (echo ASCII only)
         shell: bash
         run: |
-          set -euo pipefail
-          printf '%s\n' \
-'# Echo - Parking & Mini-Property OS' \
-'' \
-'This monorepo hosts the web app and DB for parking/mini-property leases.' \
-'' \
-'## Deploy (Vercel)' \
-'1) Vercel -> Add New -> Project -> Import this repo.' \
-'2) Framework: Next.js (apps/web).' \
-'3) Set envs:' \
-'   - NEXT_PUBLIC_SUPABASE_URL' \
-'   - NEXT_PUBLIC_SUPABASE_ANON_KEY' \
-'   - SUPABASE_SERVICE_ROLE (server only)' \
-'   - SUPABASE_JWT_SECRET (server only)' \
-'   - NEXT_PUBLIC_APP_URL' \
-'4) Deploy -> verify /ops/health returns { ok: true }.' \
-> README.md
+          echo -e '# Echo - Parking & Mini-Property OS\n\nThis monorepo hosts the web app and DB for parking/mini-property leases.\n\n## Deploy (Vercel)\n1) Vercel -> Add New -> Project -> Import this repo.\n2) Framework: Next.js (apps/web).\n3) Set envs:\n   - NEXT_PUBLIC_SUPABASE_URL\n   - NEXT_PUBLIC_SUPABASE_ANON_KEY\n   - SUPABASE_SERVICE_ROLE (server only)\n   - SUPABASE_JWT_SECRET (server only)\n   - NEXT_PUBLIC_APP_URL\n4) Deploy -> verify /ops/health returns { ok: true }.' > README.md
 
       - name: Commit and push
         shell: bash
         run: |
-          set -euo pipefail
           git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: SAFE v1 bootstrap README"
-          fi
-          git push -u origin "$BRANCH_NAME" || true
+          git commit -m "chore: SAFE v1 bootstrap README" || true
+          git push -u origin feat/post-merge-mega || true
 
       - name: Install GitHub CLI
         shell: bash
         run: |
           sudo apt-get update -y
           sudo apt-get install -y gh
-          gh --version
 
-      - name: Open or update PR
+      - name: Open PR if missing
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          set -euo pipefail
-          if ! gh pr view "$BRANCH_NAME" >/dev/null 2>&1; then
-            gh pr create --base main --head "$BRANCH_NAME" \
-              --title "[RUN] SAFE v1 Bootstrap — README" \
-              --body "Creates baseline README via YAML-safe printf. Next step: expand scaffold from this PR."
-          else
-            gh pr edit "$BRANCH_NAME" --title "[RUN] SAFE v1 Bootstrap — README" || true
-          fi
+          gh pr view feat/post-merge-mega >/dev/null 2>&1 || \
+          gh pr create --base main --head feat/post-merge-mega \
+            --title "[RUN] SAFE v1 Bootstrap — README" \
+            --body "Creates baseline README via YAML-safe echo. Next step: expand scaffold from this PR."
