@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BRANCH_NAME: feat/post-merge-mega
+      GH_TOKEN: ${{ github.token }}   # use built-in token
 
     steps:
       - name: Checkout
@@ -32,6 +33,7 @@ jobs:
       - name: A) Baseline files & health route
         run: |
           set -euo pipefail
+          # README
           if [ ! -f README.md ]; then
             cat > README.md <<'MD'
 # Echo — Parking & Mini-Property OS
@@ -53,6 +55,7 @@ See CI notes below; Playwright smoke included.
 MD
           fi
 
+          # .gitignore
           if [ ! -f .gitignore ]; then
             cat > .gitignore <<'IGN'
 node_modules
@@ -68,6 +71,7 @@ test-results
 IGN
           fi
 
+          # vercel.json
           cat > vercel.json <<'JSON'
 {
   "framework": "nextjs",
@@ -76,6 +80,7 @@ IGN
 }
 JSON
 
+          # .env.example
           if [ ! -f .env.example ]; then
             cat > .env.example <<'ENV'
 NEXT_PUBLIC_SUPABASE_URL=
@@ -86,6 +91,7 @@ NEXT_PUBLIC_APP_URL=
 ENV
           fi
 
+          # Health route
           mkdir -p apps/web/app/ops/health
           cat > apps/web/app/ops/health/route.ts <<'TS'
 import { NextResponse } from "next/server";
@@ -275,7 +281,15 @@ TSX
           fi
           git push -u origin "$BRANCH_NAME" || true
 
-      - name: Open or update PR
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gh
+          gh --version
+
+      - name: Open or update PR (via gh cli, using GITHUB_TOKEN)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if ! gh pr view "$BRANCH_NAME" >/dev/null 2>&1; then
@@ -285,4 +299,3 @@ TSX
           else
             gh pr edit "$BRANCH_NAME" --title "[RUN] Post-Merge Mega — Bootstrap A–H Skeleton" || true
           fi
- 
