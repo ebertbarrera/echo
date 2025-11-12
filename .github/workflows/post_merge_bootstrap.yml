@@ -1,11 +1,86 @@
-name: Sanity (YAML OK)
+name: Post-Merge Bootstrap (SAFE v1)
 
 on:
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  ok:
+  bootstrap:
     runs-on: ubuntu-latest
+    env:
+      BRANCH_NAME: feat/post-merge-mega
+      GH_TOKEN: ${{ github.token }}
+
     steps:
-      - name: Echo
-        run: echo "YAML parsed fine."
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Git identity
+        shell: bash
+        run: |
+          git config --global safe.directory '*'
+          git config --global user.email "agent@local"
+          git config --global user.name  "AI Agent"
+
+      - name: Create or reset feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B "$BRANCH_NAME"
+
+      - name: Write baseline README (printf only; YAML-safe)
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+'# Echo - Parking & Mini-Property OS' \
+'' \
+'This monorepo hosts the web app and DB for parking/mini-property leases.' \
+'' \
+'## Deploy (Vercel)' \
+'1) Vercel -> Add New -> Project -> Import this repo.' \
+'2) Framework: Next.js (apps/web).' \
+'3) Set envs:' \
+'   - NEXT_PUBLIC_SUPABASE_URL' \
+'   - NEXT_PUBLIC_SUPABASE_ANON_KEY' \
+'   - SUPABASE_SERVICE_ROLE (server only)' \
+'   - SUPABASE_JWT_SECRET (server only)' \
+'   - NEXT_PUBLIC_APP_URL' \
+'4) Deploy -> verify /ops/health returns { ok: true }.' \
+> README.md
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: SAFE v1 bootstrap README"
+          fi
+          git push -u origin "$BRANCH_NAME" || true
+
+      - name: Install GitHub CLI
+        shell: bash
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gh
+          gh --version
+
+      - name: Open or update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh pr view "$BRANCH_NAME" >/dev/null 2>&1; then
+            gh pr create --base main --head "$BRANCH_NAME" \
+              --title "[RUN] SAFE v1 Bootstrap — README" \
+              --body "Creates baseline README via YAML-safe printf. Next step: expand scaffold from this PR."
+          else
+            gh pr edit "$BRANCH_NAME" --title "[RUN] SAFE v1 Bootstrap — README" || true
+          fi
