@@ -26,13 +26,12 @@ jobs:
 
       - name: Create or reset feature branch
         shell: bash
-        run: |
-          git checkout -B feat/post-merge-mega
+        run: git checkout -B feat/post-merge-mega
 
-      - name: Write baseline README (echo ASCII only)
+      - name: Write baseline README (single-line printf; YAML-proof)
         shell: bash
         run: |
-          echo -e '# Echo - Parking & Mini-Property OS\n\nThis monorepo hosts the web app and DB for parking/mini-property leases.\n\n## Deploy (Vercel)\n1) Vercel -> Add New -> Project -> Import this repo.\n2) Framework: Next.js (apps/web).\n3) Set envs:\n   - NEXT_PUBLIC_SUPABASE_URL\n   - NEXT_PUBLIC_SUPABASE_ANON_KEY\n   - SUPABASE_SERVICE_ROLE (server only)\n   - SUPABASE_JWT_SECRET (server only)\n   - NEXT_PUBLIC_APP_URL\n4) Deploy -> verify /ops/health returns { ok: true }.' > README.md
+          printf %b '# Echo - Parking & Mini-Property OS\n\nThis monorepo hosts the web app and DB for parking/mini-property leases.\n\n## Deploy (Vercel)\n1) Vercel -> Add New -> Project -> Import this repo.\n2) Framework: Next.js (apps/web).\n3) Set envs:\n   - NEXT_PUBLIC_SUPABASE_URL\n   - NEXT_PUBLIC_SUPABASE_ANON_KEY\n   - SUPABASE_SERVICE_ROLE (server only)\n   - SUPABASE_JWT_SECRET (server only)\n   - NEXT_PUBLIC_APP_URL\n4) Deploy -> verify /ops/health returns { ok: true }.\n' > README.md
 
       - name: Commit and push
         shell: bash
@@ -55,4 +54,4 @@ jobs:
           gh pr view feat/post-merge-mega >/dev/null 2>&1 || \
           gh pr create --base main --head feat/post-merge-mega \
             --title "[RUN] SAFE v1 Bootstrap — README" \
-            --body "Creates baseline README via YAML-safe echo. Next step: expand scaffold from this PR."
+            --body "Creates baseline README via YAML-safe printf. Next step: expand scaffold from this PR."
