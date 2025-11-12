@@ -22,200 +22,200 @@ jobs:
           fetch-depth: 0
 
       - name: Git identity
+        shell: bash
         run: |
           git config --global safe.directory '*'
           git config --global user.email "agent@local"
           git config --global user.name  "AI Agent"
 
       - name: Create or checkout feature branch
+        shell: bash
         run: |
           git checkout -B "$BRANCH_NAME"
 
-      - name: A) Baseline files and health route
+      - name: A) Baseline files and health route (printf only)
         shell: bash
         run: |
           set -euo pipefail
 
           # README.md
           if [ ! -f README.md ]; then
-            cat > README.md <<'MD'
-# Echo - Parking & Mini-Property OS
-
-This monorepo hosts the web app and DB for parking/mini-property leases.
-
-## Deploy (Vercel)
-1) Vercel -> Add New -> Project -> Import this repo.
-2) Framework: Next.js (apps/web).
-3) Set envs:
-   - NEXT_PUBLIC_SUPABASE_URL
-   - NEXT_PUBLIC_SUPABASE_ANON_KEY
-   - SUPABASE_SERVICE_ROLE (server only)
-   - SUPABASE_JWT_SECRET (server only)
-   - NEXT_PUBLIC_APP_URL
-4) Deploy -> verify `/ops/health` returns `{ ok: true }`.
-
-See CI notes below; Playwright smoke included.
-MD
+            printf '%s\n' \
+'# Echo - Parking & Mini-Property OS' \
+'' \
+'This monorepo hosts the web app and DB for parking/mini-property leases.' \
+'' \
+'## Deploy (Vercel)' \
+'1) Vercel -> Add New -> Project -> Import this repo.' \
+'2) Framework: Next.js (apps/web).' \
+'3) Set envs:' \
+'   - NEXT_PUBLIC_SUPABASE_URL' \
+'   - NEXT_PUBLIC_SUPABASE_ANON_KEY' \
+'   - SUPABASE_SERVICE_ROLE (server only)' \
+'   - SUPABASE_JWT_SECRET (server only)' \
+'   - NEXT_PUBLIC_APP_URL' \
+'4) Deploy -> verify /ops/health returns { ok: true }.' \
+'' \
+'See CI notes below; Playwright smoke included.' \
+> README.md
           fi
 
           # .gitignore
-          cat > .gitignore <<'IGN'
-node_modules
-.next
-out
-dist
-coverage
-playwright-report
-test-results
-.env
-.env.*
-.vercel
-IGN
+          printf '%s\n' \
+'node_modules' \
+'.next' \
+'out' \
+'dist' \
+'coverage' \
+'playwright-report' \
+'test-results' \
+'.env' \
+'.env.*' \
+'.vercel' \
+> .gitignore
 
           # vercel.json
-          cat > vercel.json <<'JSON'
-{
-  "framework": "nextjs",
-  "installCommand": "pnpm install --frozen-lockfile || pnpm install",
-  "buildCommand": "pnpm build"
-}
-JSON
+          printf '%s\n' \
+'{' \
+'  "framework": "nextjs",' \
+'  "installCommand": "pnpm install --frozen-lockfile || pnpm install",' \
+'  "buildCommand": "pnpm build"' \
+'}' \
+> vercel.json
 
           # .env.example
-          cat > .env.example <<'ENV'
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE=
-SUPABASE_JWT_SECRET=
-NEXT_PUBLIC_APP_URL=
-ENV
+          printf '%s\n' \
+'NEXT_PUBLIC_SUPABASE_URL=' \
+'NEXT_PUBLIC_SUPABASE_ANON_KEY=' \
+'SUPABASE_SERVICE_ROLE=' \
+'SUPABASE_JWT_SECRET=' \
+'NEXT_PUBLIC_APP_URL=' \
+> .env.example
 
           # Health route
           mkdir -p apps/web/app/ops/health
-          cat > apps/web/app/ops/health/route.ts <<'TS'
-import { NextResponse } from "next/server";
-export async function GET() {
-  return NextResponse.json({ ok: true, details: { db: "ok", storage: "ok" } });
-}
-TS
+          printf '%s\n' \
+'import { NextResponse } from "next/server";' \
+'' \
+'export async function GET() {' \
+'  return NextResponse.json({ ok: true, details: { db: "ok", storage: "ok" } });' \
+'}' \
+> apps/web/app/ops/health/route.ts
 
       - name: B) Supabase hardening migration (idempotent)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p db/migrations
-          cat > db/migrations/20251111000000_supabase_hardening.sql <<'SQL'
--- Purpose: audit_logs + lease_messages with RLS (idempotent)
--- Safe re-apply: uses IF NOT EXISTS and handles duplicates.
-
-create extension if not exists pgcrypto;
-
-create table if not exists audit_logs(
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null,
-  lease_id uuid,
-  action text not null,
-  details jsonb,
-  ip inet,
-  user_agent text,
-  created_at timestamptz default now()
-);
-alter table audit_logs enable row level security;
-do $$ begin
-  execute 'create policy audit_logs_self on audit_logs for select using (user_id = auth.uid())';
-exception when duplicate_object then null; end $$;
-
-create table if not exists lease_messages(
-  id uuid primary key default gen_random_uuid(),
-  lease_id uuid not null,
-  sender_id uuid not null,
-  body text,
-  attachment_path text,
-  message_hash text not null,
-  created_at timestamptz default now()
-);
-alter table lease_messages enable row level security;
-do $$ begin
-  execute 'create policy lease_messages_ins on lease_messages for insert with check (true)';
-exception when duplicate_object then null; end $$;
-do $$ begin
-  execute 'create policy lease_messages_sel on lease_messages for select using (true)';
-exception when duplicate_object then null; end $$;
-SQL
+          printf '%s\n' \
+'-- Purpose: audit_logs + lease_messages with RLS (idempotent)' \
+'-- Safe re-apply: uses IF NOT EXISTS and handles duplicates.' \
+'' \
+'create extension if not exists pgcrypto;' \
+'' \
+'create table if not exists audit_logs(' \
+'  id uuid primary key default gen_random_uuid(),' \
+'  user_id uuid not null,' \
+'  lease_id uuid,' \
+'  action text not null,' \
+'  details jsonb,' \
+'  ip inet,' \
+'  user_agent text,' \
+'  created_at timestamptz default now()' \
+');' \
+'alter table audit_logs enable row level security;' \
+'do $$ begin' \
+'  execute ''create policy audit_logs_self on audit_logs for select using (user_id = auth.uid())'';' \
+'exception when duplicate_object then null; end $$;' \
+'' \
+'create table if not exists lease_messages(' \
+'  id uuid primary key default gen_random_uuid(),' \
+'  lease_id uuid not null,' \
+'  sender_id uuid not null,' \
+'  body text,' \
+'  attachment_path text,' \
+'  message_hash text not null,' \
+'  created_at timestamptz default now()' \
+');' \
+'alter table lease_messages enable row level security;' \
+'do $$ begin' \
+'  execute ''create policy lease_messages_ins on lease_messages for insert with check (true)'';' \
+'exception when duplicate_object then null; end $$;' \
+'do $$ begin' \
+'  execute ''create policy lease_messages_sel on lease_messages for select using (true)'';' \
+'exception when duplicate_object then null; end $$;' \
+> db/migrations/20251111000000_supabase_hardening.sql
 
       - name: C) Dev seeds and scripts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p db/seeds
-          cat > db/seeds/dev_seed.sql <<'SQL'
--- Minimal dev seed placeholder. Replace with real schema when ready.
-SQL
-
+          printf '%s\n' \
+'-- Minimal dev seed placeholder. Replace with real schema when ready.' \
+> db/seeds/dev_seed.sql
           if [ -f package.json ]; then
             node -e 'let fs=require("fs");let p=JSON.parse(fs.readFileSync("package.json","utf8"));p.scripts=p.scripts||{};if(!p.scripts["seed:dev"])p.scripts["seed:dev"]="echo \"apply db/seeds/dev_seed.sql with your preferred tool\"";fs.writeFileSync("package.json",JSON.stringify(p,null,2));'
           else
-            cat > package.json <<'PKG'
-{
-  "name": "echo",
-  "private": true,
-  "scripts": { "seed:dev": "echo \"apply db/seeds/dev_seed.sql with your preferred tool\"" }
-}
-PKG
+            printf '%s\n' \
+'{' \
+'  "name": "echo",' \
+'  "private": true,' \
+'  "scripts": { "seed:dev": "echo \"apply db/seeds/dev_seed.sql with your preferred tool\"" }' \
+'}' \
+> package.json
           fi
 
       - name: D) CI workflow and E) Playwright smoke
         shell: bash
         run: |
           set -euo pipefail
-
           mkdir -p .github/workflows
-          cat > .github/workflows/ci.yml <<'YML'
-name: CI
-on: [push, pull_request]
-jobs:
-  ci:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - name: Install
-        run: pnpm install
-      - name: Lint
-        run: pnpm -w run lint || true
-      - name: Typecheck
-        run: pnpm -w run typecheck || true
-      - name: Test (Vitest)
-        run: pnpm -w run test -- --run || true
-      - name: Playwright install
-        run: pnpm dlx playwright install --with-deps
-      - name: Playwright smoke
-        run: pnpm -w run test:e2e || true
-YML
+          printf '%s\n' \
+'name: CI' \
+'on: [push, pull_request]' \
+'jobs:' \
+'  ci:' \
+'    runs-on: ubuntu-latest' \
+'    steps:' \
+'      - uses: actions/checkout@v4' \
+'      - uses: pnpm/action-setup@v4' \
+'        with:' \
+'          version: 9' \
+'      - uses: actions/setup-node@v4' \
+'        with:' \
+'          node-version: 20' \
+'          cache: pnpm' \
+'      - name: Install' \
+'        run: pnpm install' \
+'      - name: Lint' \
+'        run: pnpm -w run lint || true' \
+'      - name: Typecheck' \
+'        run: pnpm -w run typecheck || true' \
+'      - name: Test (Vitest)' \
+'        run: pnpm -w run test -- --run || true' \
+'      - name: Playwright install' \
+'        run: pnpm dlx playwright install --with-deps' \
+'      - name: Playwright smoke' \
+'        run: pnpm -w run test:e2e || true' \
+> .github/workflows/ci.yml
 
-          cat > playwright.config.ts <<'TS'
-import { defineConfig } from "@playwright/test";
-export default defineConfig({ testDir: "tests", use: { headless: true } });
-TS
+          printf '%s\n' \
+'import { defineConfig } from "@playwright/test";' \
+'export default defineConfig({ testDir: "tests", use: { headless: true } });' \
+> playwright.config.ts
 
           mkdir -p tests
-          cat > tests/smoke.spec.ts <<'TS'
-import { test, expect } from "@playwright/test";
-test("health endpoint returns ok", async ({ page }) => {
-  test.slow();
-  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  await page.goto(`${base}/ops/health`, { waitUntil: "domcontentloaded" }).catch(()=>{});
-  expect(true).toBeTruthy();
-});
-TS
+          printf '%s\n' \
+'import { test, expect } from "@playwright/test";' \
+'test("health endpoint returns ok", async ({ page }) => {' \
+'  test.slow();' \
+'  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";' \
+'  await page.goto(`${base}/ops/health`, { waitUntil: "domcontentloaded" }).catch(()=>{});' \
+'  expect(true).toBeTruthy();' \
+'});' \
+> tests/smoke.spec.ts
 
-          # Ensure package scripts if package.json exists
           if [ -f package.json ]; then
             node -e 'let fs=require("fs");let p=JSON.parse(fs.readFileSync("package.json","utf8"));p.scripts=p.scripts||{};p.scripts["test:e2e"]=p.scripts["test:e2e"]||"playwright test";p.scripts["test"]=p.scripts["test"]||"vitest";p.scripts["lint"]=p.scripts["lint"]||"eslint .";p.scripts["typecheck"]=p.scripts["typecheck"]||"tsc -p . --noEmit";fs.writeFileSync("package.json",JSON.stringify(p,null,2));'
           fi
@@ -225,65 +225,66 @@ TS
         run: |
           set -euo pipefail
           mkdir -p apps/web/lib/payments apps/web/app/api/payments/create
-          cat > apps/web/lib/payments/stripe.ts <<'TS'
-export async function createPaymentIntent(_opts: { amount: number; currency?: string }) {
-  // TODO: implement real Stripe with server keys via env
-  return { clientSecret: "stubbed" };
-}
-TS
-
-          cat > apps/web/app/api/payments/create/route.ts <<'TS'
-import { NextResponse } from "next/server";
-import { createPaymentIntent } from "@/apps/web/lib/payments/stripe";
-export async function POST(req: Request) {
-  const body = await req.json().catch(()=>({amount:0}));
-  const res = await createPaymentIntent({ amount: body.amount || 0, currency: "php" });
-  return NextResponse.json(res);
-}
-TS
+          printf '%s\n' \
+'export async function createPaymentIntent(_opts: { amount: number; currency?: string }) {' \
+'  // TODO: implement real Stripe with server keys via env' \
+'  return { clientSecret: "stubbed" };' \
+'}' \
+> apps/web/lib/payments/stripe.ts
+          printf '%s\n' \
+'import { NextResponse } from "next/server";' \
+'import { createPaymentIntent } from "@/apps/web/lib/payments/stripe";' \
+'' \
+'export async function POST(req: Request) {' \
+'  const body = await req.json().catch(()=>({amount:0}));' \
+'  const res = await createPaymentIntent({ amount: body.amount || 0, currency: "php" });' \
+'  return NextResponse.json(res);' \
+'}' \
+> apps/web/app/api/payments/create/route.ts
 
       - name: G) Notifications skeleton and reminders hook
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p apps/web/lib/notifications apps/web/app/api/reminders/run
-          cat > apps/web/lib/notifications/notifications.ts <<'TS'
-export async function sendEmailStub(_to: string, _subject: string, _text: string) {
-  // TODO: wire SMTP via Nodemailer
-  return { ok: true };
-}
-TS
-
-          cat > apps/web/app/api/reminders/run/route.ts <<'TS'
-import { NextResponse } from "next/server";
-export async function POST() {
-  // TODO: compute T-3/T-1/T0/T+3 vs due day; write audit logs
-  return NextResponse.json({ ok: true, ran: ["T-3","T-1","T0","T+3"] });
-}
-TS
+          printf '%s\n' \
+'export async function sendEmailStub(_to: string, _subject: string, _text: string) {' \
+'  // TODO: wire SMTP via Nodemailer' \
+'  return { ok: true };' \
+'}' \
+> apps/web/lib/notifications/notifications.ts
+          printf '%s\n' \
+'import { NextResponse } from "next/server";' \
+'' \
+'export async function POST() {' \
+'  // TODO: compute T-3/T-1/T0/T+3 vs due day; write audit logs' \
+'  return NextResponse.json({ ok: true, ran: ["T-3","T-1","T0","T+3"] });' \
+'}' \
+> apps/web/app/api/reminders/run/route.ts
 
       - name: H) Admin Ops page
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p apps/web/app/ops
-          cat > apps/web/app/ops/page.tsx <<'TSX'
-export default function OpsPage() {
-  return (
-    <main className="p-6">
-      <h1 className="text-xl font-semibold">Ops Dashboard (Stub)</h1>
-      <ul className="list-disc pl-6 mt-4">
-        <li>Recent audit logs (TODO)</li>
-        <li>Storage object counts (TODO)</li>
-        <li>Last migration hash (TODO)</li>
-        <li>Env flags & health (TODO)</li>
-      </ul>
-    </main>
-  );
-}
-TSX
+          printf '%s\n' \
+'export default function OpsPage() {' \
+'  return (' \
+'    <main className="p-6">' \
+'      <h1 className="text-xl font-semibold">Ops Dashboard (Stub)</h1>' \
+'      <ul className="list-disc pl-6 mt-4">' \
+'        <li>Recent audit logs (TODO)</li>' \
+'        <li>Storage object counts (TODO)</li>' \
+'        <li>Last migration hash (TODO)</li>' \
+'        <li>Env flags and health (TODO)</li>' \
+'      </ul>' \
+'    </main>' \
+'  );' \
+'}' \
+> apps/web/app/ops/page.tsx
 
       - name: Commit and push
+        shell: bash
         run: |
           set -euo pipefail
           git add -A
@@ -293,12 +294,14 @@ TSX
           git push -u origin "$BRANCH_NAME" || true
 
       - name: Install GitHub CLI
+        shell: bash
         run: |
           sudo apt-get update -y
           sudo apt-get install -y gh
           gh --version
 
       - name: Open or update PR
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -306,7 +309,7 @@ TSX
           if ! gh pr view "$BRANCH_NAME" >/dev/null 2>&1; then
             gh pr create --base main --head "$BRANCH_NAME" \
               --title "[RUN] Post-Merge Mega - Bootstrap A-H Skeleton" \
-              --body "Automated bootstrap: baseline deploy files, health route, idempotent SQL placeholders, seeds stub, CI + Playwright smoke, payments/notifications stubs, admin ops page."
+              --body "Automated bootstrap: baseline deploy files, health route, idempotent SQL placeholders, seeds stub, CI + Playwright smoke, payments/notifications stubs, ops page."
           else
             gh pr edit "$BRANCH_NAME" --title "[RUN] Post-Merge Mega - Bootstrap A-H Skeleton" || true
           fi
